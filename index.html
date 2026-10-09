@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Star Chat 明星對話紀錄產生器</title>
+
+  <!-- 引入 html2canvas 庫（用於將 HTML 轉為 PNG 圖片下載） -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { display: flex; height: 100vh; background: #f0f2f5; }
+    
+    /* 左側控制區 */
+    .editor-panel { width: 400px; padding: 20px; background: #fff; border-right: 1px solid #ddd; overflow-y: auto; }
+    .editor-panel h2 { margin-bottom: 15px; font-size: 18px; color: #333; }
+    .form-group { margin-bottom: 15px; }
+    .form-group label { display: block; margin-bottom: 5px; font-size: 14px; color: #666; font-weight: 500; }
+    .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; }
+    
+    .btn { width: 100%; padding: 10px; background: #007bff; color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 14px; margin-top: 5px; transition: 0.2s; }
+    .btn:hover { background: #0056b3; }
+    .btn-success { background: #28a745; margin-top: 15px; }
+    .btn-success:hover { background: #218838; }
+
+    /* 右側預覽區 */
+    .preview-panel { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 20px; background: #222; }
+    
+    /* 對話容器 */
+    .chat-container { width: 380px; min-height: 520px; background: #2a2a2e; padding: 20px; border-radius: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
+    
+    /* 明星頭像與名稱列 */
+    .chat-header { display: flex; align-items: center; gap: 10px; color: white; margin-bottom: 20px; }
+    .avatar { width: 42px; height: 42px; border-radius: 50%; object-fit: cover; background: #555; }
+    .header-info { display: flex; align-items: center; gap: 6px; }
+    .star-name { font-weight: bold; font-size: 16px; }
+    .badge { width: 16px; height: 16px; background: #fff; color: #007bff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; }
+    .time-stamp { font-size: 13px; color: rgba(255, 255, 255, 0.6); margin-left: auto; }
+
+    /* 訊息氣泡樣式 */
+    .message-group { margin-bottom: 12px; }
+    .bubble { background: #ffffff; border-radius: 18px; padding: 12px 16px; color: #111; font-size: 15px; line-height: 1.45; max-width: 92%; word-break: break-word; }
+    
+    /* 媒體 (圖片/影片) 氣泡 */
+    .media-bubble { padding: 0; overflow: hidden; border-radius: 18px; max-width: 92%; }
+    .media-bubble img { width: 100%; display: block; border-radius: 18px; }
+
+    /* 引用回覆氣泡 (圖三樣式) */
+    .quote-box { font-size: 13px; color: #777; margin-bottom: 6px; border-bottom: 1px solid #eee; padding-bottom: 6px; }
+    .quote-author { font-weight: bold; color: #333; margin-bottom: 2px; }
+    .reply-text { color: #111; }
+  </style>
+</head>
+<body>
+
+  <!-- 控制面板 -->
+  <div class="editor-panel">
+    <h2>明星 Chat 紀錄編輯器</h2>
+    
+    <div class="form-group">
+      <label>明星暱稱</label>
+      <input type="text" id="starName" value="상원">
+    </div>
+
+    <div class="form-group">
+      <label>訊息時間</label>
+      <input type="text" id="msgTime" value="9:47 PM">
+    </div>
+
+    <div class="form-group">
+      <label>明星頭像 URL / 選擇檔案</label>
+      <input type="file" id="avatarUpload" accept="image/*" onchange="updateAvatar(event)">
+    </div>
+
+    <hr style="margin: 15px 0;">
+
+    <div class="form-group">
+      <label>訊息類型</label>
+      <select id="msgType" onchange="toggleInputs()">
+        <option value="text">純文字訊息</option>
+        <option value="image">圖片訊息</option>
+        <option value="reply">引用回覆 (Reply)</option>
+      </select>
+    </div>
+
+    <!-- 引用專用輸入框 -->
+    <div class="form-group" id="quoteInputGroup" style="display: none;">
+      <label>被引用的原本文字</label>
+      <input type="text" id="quoteText" placeholder="例如：대낮에 이러고 다니는데 알아보는 사람 없">
+    </div>
+
+    <!-- 主文字輸入框 -->
+    <div class="form-group" id="mainTextInputGroup">
+      <label>對話內容</label>
+      <textarea id="mainText" rows="3">날씨는 더웠지만 페이스는 잘 유지하려고 노력해줬어.</textarea>
+    </div>
+
+    <!-- 圖片上傳輸入框 -->
+    <div class="form-group" id="imageInputGroup" style="display: none;">
+      <label>上傳對話圖片</label>
+      <input type="file" id="imgUpload" accept="image/*">
+    </div>
+
+    <button class="btn" onclick="addMessage()">新增訊息卡片</button>
+    
+    <!-- 下載按鈕 -->
+    <button class="btn btn-success" onclick="downloadPNG()">📸 下載為 PNG 圖片</button>
+  </div>
+
+  <!-- 預覽畫面 -->
+  <div class="preview-panel">
+    <div class="chat-container" id="chatContainer">
+      <div class="chat-header">
+        <img class="avatar" id="headerAvatar" src="https://via.placeholder.com/100" alt="avatar">
+        <div class="header-info">
+          <span class="star-name" id="headerName">상원</span>
+          <span class="badge">✓</span>
+        </div>
+        <span class="time-stamp" id="headerTime">9:47 PM</span>
+      </div>
+
+      <!-- 動態新增訊息區域 -->
+      <div id="messageList"></div>
+    </div>
+  </div>
+
+  <script>
+    // 即時更新頂部資訊
+    document.getElementById('starName').addEventListener('input', (e) => {
+      document.getElementById('headerName').innerText = e.target.value || '상원';
+    });
+    
+    document.getElementById('msgTime').addEventListener('input', (e) => {
+      document.getElementById('headerTime').innerText = e.target.value || '9:47 PM';
+    });
+
+    function updateAvatar(event) {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          document.getElementById('headerAvatar').src = e.target.result;
+        }
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function toggleInputs() {
+      const type = document.getElementById('msgType').value;
+      document.getElementById('quoteInputGroup').style.display = type === 'reply' ? 'block' : 'none';
+      document.getElementById('imageInputGroup').style.display = type === 'image' ? 'block' : 'none';
+      document.getElementById('mainTextInputGroup').style.display = type === 'image' ? 'none' : 'block';
+    }
+
+    function addMessage() {
+      const type = document.getElementById('msgType').value;
+      const starName = document.getElementById('starName').value || '상원';
+      const list = document.getElementById('messageList');
+
+      const group = document.createElement('div');
+      group.className = 'message-group';
+
+      if (type === 'text') {
+        const text = document.getElementById('mainText').value;
+        if (!text) return;
+        group.innerHTML = `<div class="bubble">${text.replace(/\n/g, '<br>')}</div>`;
+        list.appendChild(group);
+      } else if (type === 'reply') {
+        const quote = document.getElementById('quoteText').value;
+        const text = document.getElementById('mainText').value;
+        if (!text) return;
+        group.innerHTML = `
+          <div class="bubble">
+            <div class="quote-box">
+              <div class="quote-author">${starName}'s reply</div>
+              <div>${quote}</div>
+            </div>
+            <div class="reply-text">↳ ${text.replace(/\n/g, '<br>')}</div>
+          </div>`;
+        list.appendChild(group);
+      } else if (type === 'image') {
+        const file = document.getElementById('imgUpload').files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = function(e) {
+            group.innerHTML = `<div class="media-bubble"><img src="${e.target.result}"></div>`;
+            list.appendChild(group);
+          }
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+
+    // 下載 PNG 功能
+    function downloadPNG() {
+      const target = document.getElementById('chatContainer');
+
+      // 使用 html2canvas 渲染預覽區塊
+      html2canvas(target, {
+        scale: 2, // 提高解析度（清晰度）
+        useCORS: true, // 允許跨域圖片渲染
+        backgroundColor: null // 保持圓角透明背景
+      }).then(canvas => {
+        const link = document.createElement('a');
+        link.download = `star-chat-${Date.now()}.png`;
+        link.href = canvas.toDataURL('image/png');
+        link.click();
+      }).catch(err => {
+        alert('匯出失敗，請檢查圖片網址或檔案');
+        console.error(err);
+      });
+    }
+  </script>
+</body>
+</html>
